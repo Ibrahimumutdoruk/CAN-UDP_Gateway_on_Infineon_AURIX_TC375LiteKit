@@ -1,0 +1,135 @@
+#include "Ifx_Types.h"
+#include "IfxCpu.h"
+#include "IfxScuWdt.h"
+#include "IfxStm.h"
+#include "IfxGeth_Eth.h"
+#include "Ifx_Lwip.h"
+#include "IfxPort.h"
+#include "Bsp.h"  // for wait()
+#include "lwip/netif.h"
+#include "lwip/ip_addr.h"
+#include "lwip/etharp.h"  // for etharp_add_static_entry
+#include "lwip/udp.h"      // for udp functions
+#include "lwip/pbuf.h"     // for pbuf
+#include "bridge_common.h"
+#include "can_hal.h"
+#include "Configuration.h"
+#include "ConfigurationIsr.h"
+#include <string.h>
+
+IfxCpu_syncEvent g_cpuSyncEvent = 0;
+struct udp_pcb *g_udp_pcb = NULL;  // DEFINE GLOBAL VARIABLE
+volatile uint32_t can_rx_count = 0;
+volatile uint32_t udp_tx_count = 0;
+
+IFX_INTERRUPT(updateLwIPStackISR, 0, ISR_PRIORITY_OS_TICK)
+{
+    IfxStm_increaseCompare(&MODULE_STM0, IfxStm_Comparator_0, IFX_CFG_STM_TICKS_PER_MS);
+    g_TickCount_1ms++;
+    Ifx_Lwip_onTimerTick();
+}
+
+void core0_main(void)
+{
+    IfxCpu_enableInterrupts();
+    IfxScuWdt_disableCpuWatchdog(IfxScuWdt_getCpuWatchdogPassword());
+    IfxScuWdt_disableSafetyWatchdog(IfxScuWdt_getSafetyWatchdogPassword());
+    
+    IfxCpu_emitEvent(&g_cpuSyncEvent);
+    IfxCpu_waitEvent(&g_cpuSyncEvent, 1);
+    
+    // LED Setup
+    IfxPort_setPinModeOutput(&MODULE_P00, 5, IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
+    IfxPort_setPinModeOutput(&MODULE_P00, 6, IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
+    
+    // STM timer
+    IfxStm_CompareConfig stmConfig;
+    IfxStm_initCompareConfig(&stmConfig);
+    stmConfig.triggerPriority = ISR_PRIORITY_OS_TICK;
+    stmConfig.comparatorInterrupt = IfxStm_ComparatorInterrupt_ir0;
+    stmConfig.ticks = IFX_CFG_STM_TICKS_PER_MS;
+    stmConfig.typeOfService = IfxSrc_Tos_cpu0;
+    IfxStm_initCompare(&MODULE_STM0, &stmConfig);
+    
+    // GETH Enable
+    IfxGeth_enableModule(&MODULE_GETH);
+    
+    // MAC & IP Setup
+    eth_addr_t ethAddr;
+    MAC_ADDR(&ethAddr, 0x00, 0x11, 0x22, 0x33, 0x44, 0x10);
+    Ifx_Lwip_init(ethAddr);
+    
+    struct netif *netif = Ifx_Lwip_getNetIf();
+    ip_addr_t ip, mask, gw;
+    IP_ADDR4(&ip, 192, 168, 10, 10);
+    IP_ADDR4(&mask, 255, 255, 255, 0);
+    IP_ADDR4(&gw, 192, 168, 10, 1);
+    netif_set_addr(netif, &ip, &mask, &gw);
+    netif_set_up(netif);
+    netif_set_link_up(netif);
+    
+    // CAN init
+    can_hal_init(500000);
+    
+    // UDP sender init
+    g_udp_pcb = udp_new();
+    if(g_udp_pcb) {
+        ip_addr_t dest_addr;
+        IP_ADDR4(&dest_addr, 192, 168, 10, 20);  // unicast to Board B
+        udp_connect(g_udp_pcb, &dest_addr, BRIDGE_UDP_PORT);
+    }
+    
+    uint32_t test_timer = 0;
+    
+    while(1) {
+        Ifx_Lwip_pollTimerFlags();
+        Ifx_Lwip_pollReceiveFlags();
+        
+        // Test packet every 100 ms
+        if(++test_timer > 100) {
+            test_timer = 0;
+            
+            CanUdpFrame test_frame;
+            test_frame.id_be = lwip_htonl(0x123);
+            test_frame.ide = 0;
+            test_frame.rtr = 0;
+            test_frame.dlc = 8;
+            test_frame.reserved = 0;
+            memset(test_frame.data, 0xAA, 8);
+            
+            struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, sizeof(CanUdpFrame), PBUF_RAM);
+            if(p) {
+                memcpy(p->payload, &test_frame, sizeof(CanUdpFrame));
+                udp_send(g_udp_pcb, p);
+                pbuf_free(p);
+                
+                IfxPort_togglePin(&MODULE_P00, 5);
+                udp_tx_count++;
+            }
+        }
+        
+        // CAN RX check  
+        CanFrame can_frame;
+        if(can_hal_receive(&can_frame, 1)) {
+            can_rx_count++;
+            IfxPort_togglePin(&MODULE_P00, 6);
+            
+            CanUdpFrame udp_frame;
+            udp_frame.id_be = lwip_htonl(can_frame.id);
+            udp_frame.ide = can_frame.ide;
+            udp_frame.rtr = can_frame.rtr;
+            udp_frame.dlc = can_frame.dlc;
+            udp_frame.reserved = 0;
+            memcpy(udp_frame.data, can_frame.data, 8);
+            
+            struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, sizeof(CanUdpFrame), PBUF_RAM);
+            if(p) {
+                memcpy(p->payload, &udp_frame, sizeof(CanUdpFrame));
+                udp_send(g_udp_pcb, p);
+                pbuf_free(p);
+            }
+        }
+        
+        wait(1);
+    }
+}
