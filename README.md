@@ -40,7 +40,7 @@ Edit your **`lwipopts.h`** and make sure DHCP is **disabled**:
 "lwipopts.h" 
 #define LWIP_DHCP *
 
-First you need to import AURIX example " Ethernet_1_KIT_TC375_LK". Then echo.c and echo.h  have to be deleted and  It needs to be configured with these files.
+
 
 ---
 ##  System Overview
