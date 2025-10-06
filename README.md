@@ -154,7 +154,7 @@ The firmware consists of the following modules:
 ---
 <p align="center">
 <img width="1000" height="1000" alt="0x300logic" src="https://github.com/user-attachments/assets/d16f53f5-1762-435d-864e-5ec091749419" />
-*PSalae Logic Analyzer Output output*
+*Salae Logic Analyzer Output output*
 </p>
 
 ---
