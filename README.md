@@ -1,7 +1,7 @@
 # CAN ↔ UDP Gateway on AURIX TC375 Lite
 
 This repository provides firmware and documentation for implementing a **bidirectional CAN ↔ UDP gateway** on the **Infineon AURIX™ TC375 Lite Kit**.  
-The project enables seamless communication between a CAN bus and Ethernet (UDP/IP), bridging automotive communication with IP-based systems.Messages are transmitted and received using the PCAN-USB interface monitored with PCAN-View, and validated with a Saleae Logic Analyzer (CAN analyzer). ILLD library V1.20.1. and AURIX development studio version 1.10.16 are used.
+The project enables  communication between a CAN bus and Ethernet (UDP/IP), bridging automotive communication with IP-based systems.Messages are transmitted and received using the PCAN-USB interface monitored with PCAN-View, and validated with a Saleae Logic Analyzer (CAN analyzer). ILLD library V1.20.1. and AURIX development studio version 1.10.16 are used.
 
 
 
